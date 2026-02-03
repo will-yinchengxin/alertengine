@@ -1,0 +1,39 @@
+[Unit]
+Description=AlertEngine - Prometheus Alert Rule Engine
+Documentation=https://github.com/will-yinchengxin/alertengine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alertengine
+Group=alertengine
+
+# 工作目录
+WorkingDirectory=/var/lib/alertengine
+
+# 启动命令
+ExecStart=/usr/local/bin/alertengine -config /etc/alertengine/config.yml
+
+# 重启策略
+Restart=on-failure
+RestartSec=5s
+
+# 限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alertengine
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/alertengine /var/log/alertengine
+
+[Install]
+WantedBy=multi-user.target

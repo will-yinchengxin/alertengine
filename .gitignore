@@ -1,0 +1,11 @@
+.idea/
+\.idea/
+go.sum
+.DS_Store
+tests/
+vendor/
+./docs
+logs/
+tips/
+rules/
+logs/

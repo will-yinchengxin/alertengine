@@ -1,0 +1,50 @@
+# AlertEngine 配置示例
+
+# 告警通知重试次数
+notify_retries: 3
+
+# 网关配置
+gateway:
+  # 网关基础URL
+  url: "http://localhost:32002"
+  # 规则列表API路径
+  rule_path: "/api/v1/rules"
+  # 数据源列表API路径
+  prom_path: "/api/v1/proms"
+  # 告警通知API路径
+  notify_path: "/api/v1/alerts"
+  # 请求超时时间
+  timeout: 10s
+
+# 规则评估间隔（多久评估一次规则）
+evaluation_interval: 30s
+
+# 规则重载间隔（多久从网关同步一次规则）
+reload_interval: 5m
+
+# API认证Token
+auth_token: "96smhbNpRguoJOCEKNrMqQ"
+
+# 规则存储配置
+storage:
+  # 规则文件存储目录
+  rule_dir: "/var/lib/alertengine/rules"
+  # 历史版本保留天数
+  retention_days: 30
+  # 是否启用历史版本记录
+  enable_history: true
+
+# 日志配置
+log:
+  # 日志级别: debug, info, warn, error
+  level: "info"
+  # 日志格式: json, console
+  format: "json"
+  # 日志输出路径
+  output_path: "/var/log/alertengine/alertengine.log"
+
+# Prometheus指标暴露端口
+metrics_port: 9090
+
+# 是否开启告警通知
+enable_notify: true
