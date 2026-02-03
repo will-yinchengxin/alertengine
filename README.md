@@ -343,39 +343,9 @@ make lint
 make clean
 ```
 
-## 故障排查
-
-### 问题: 规则不生效
-
-检查清单:
-1. 检查规则是否正确同步: `curl http://localhost:8080/ready`
-2. 查看日志: `tail -f /var/log/alertengine/alertengine.log`
-3. 检查 Prometheus 连接: 确保 `prom_url` 可访问
-4. 验证规则语法: 检查生成的 YAML 文件
-
-### 问题: 告警未发送
-
-检查清单:
-1. 查看通知错误指标: `curl http://localhost:9090/metrics | grep notify_errors`
-2. 检查网关 notify 接口是否正常
-3. 验证 Token 是否正确
-4. 查看重试日志
-
-### 问题: 性能问题
-
-优化建议:
-1. 调整 `evaluation_interval` (增大评估间隔)
-2. 减少规则数量或优化查询表达式
-3. 检查 Prometheus 查询性能
-4. 增加系统资源
-
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request！
 
-## 许可证
-
-MIT License
 ---
-
 **Made with ❤️ by Will Yin**
