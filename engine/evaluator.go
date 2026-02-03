@@ -1,24 +1,27 @@
+// engine/evaluator.go
+
 package engine
 
 import (
+	"alertengine/common"
 	"context"
 	"time"
 )
 
-// RuleEvaluator 规则评估器
+type QueryFunc func(ctx context.Context, expr string) (bool, float64, map[string]string, error)
+type NotifyFunc func(rule EvalRule, state string)
+
 type RuleEvaluator struct {
 	rules      []EvalRule
 	interval   time.Duration
-	queryFunc  func(ctx context.Context, expr string) (bool, float64, error)
-	notifyFunc func(rule EvalRule, state string)
+	queryFunc  QueryFunc
+	notifyFunc NotifyFunc
 }
 
-// UpdateRules 更新规则
 func (e *RuleEvaluator) UpdateRules(rules []EvalRule) {
 	e.rules = rules
 }
 
-// Run 运行评估循环
 func (e *RuleEvaluator) Run(ctx context.Context) {
 	ticker := time.NewTicker(e.interval)
 	defer ticker.Stop()
@@ -33,28 +36,38 @@ func (e *RuleEvaluator) Run(ctx context.Context) {
 	}
 }
 
-// evaluate 执行评估
 func (e *RuleEvaluator) evaluate(ctx context.Context) {
 	now := time.Now()
 
 	for i := range e.rules {
 		rule := &e.rules[i]
 
-		// 查询 Prometheus
-		hasValue, value, err := e.queryFunc(ctx, rule.Expr)
+		hasValue, value, metricLabels, err := e.queryFunc(ctx, rule.Expr)
 		if err != nil {
 			continue
 		}
 
-		rule.LastValue = value
+		if hasValue && metricLabels != nil {
+			mergedLabels := make(map[string]string)
 
-		// 状态机转换
-		e.updateRuleState(rule, hasValue, now)
+			for _, label := range rule.Labels {
+				mergedLabels[label.Name] = label.Value
+			}
+
+			for k, v := range metricLabels {
+				mergedLabels[k] = v
+			}
+			
+			rule.Labels = common.FromMap(mergedLabels)
+		}
+
+		e.updateRuleState(rule, hasValue, value, now)
 	}
 }
 
-// updateRuleState 更新规则状态
-func (e *RuleEvaluator) updateRuleState(rule *EvalRule, hasValue bool, now time.Time) {
+func (e *RuleEvaluator) updateRuleState(rule *EvalRule, hasValue bool, value float64, now time.Time) {
+	rule.LastValue = value
+
 	switch rule.State {
 	case StateInactive:
 		if hasValue {
@@ -64,11 +77,9 @@ func (e *RuleEvaluator) updateRuleState(rule *EvalRule, hasValue bool, now time.
 
 	case StatePending:
 		if !hasValue {
-			// 条件不再满足，回到 inactive
 			rule.State = StateInactive
 			rule.ActiveAt = time.Time{}
 		} else if now.Sub(rule.ActiveAt) >= rule.For {
-			// 持续时间达到，进入 firing
 			rule.State = StateFiring
 			rule.FiredAt = now
 			if e.notifyFunc != nil {
@@ -78,14 +89,17 @@ func (e *RuleEvaluator) updateRuleState(rule *EvalRule, hasValue bool, now time.
 
 	case StateFiring:
 		if !hasValue {
-			// 条件不再满足，发送 resolved 通知
 			if e.notifyFunc != nil {
 				e.notifyFunc(*rule, "resolved")
 			}
 			rule.State = StateInactive
 			rule.ActiveAt = time.Time{}
 			rule.FiredAt = time.Time{}
+		} else {
+			// 持续 firing
+			if e.notifyFunc != nil {
+				e.notifyFunc(*rule, "firing")
+			}
 		}
-		// firing 状态下持续满足条件，保持状态
 	}
 }

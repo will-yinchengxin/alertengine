@@ -1,8 +1,12 @@
 package engine
 
 import (
+	"alertengine/common"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -46,7 +50,7 @@ type EvalRule struct {
 	PromID      int64
 	Expr        string
 	For         time.Duration
-	Labels      map[string]string
+	Labels      common.Labels
 	Annotations map[string]string
 	State       RuleState
 	ActiveAt    time.Time
@@ -57,14 +61,13 @@ type EvalRule struct {
 // Alert 告警数据
 type Alert struct {
 	State       string            `json:"state"`
-	Labels      map[string]string `json:"labels"`
+	Labels      common.Labels     `json:"labels"`
 	Annotations map[string]string `json:"annotations"`
 	Value       float64           `json:"value"`
 	ActiveAt    string            `json:"active_at"`
 	FiredAt     string            `json:"fired_at,omitempty"`
 }
 
-// NewManager 创建管理器
 func NewManager(
 	ctx context.Context,
 	prom rule.Prom,
@@ -73,7 +76,6 @@ func NewManager(
 	logger *zap.Logger,
 	metrics *Metrics,
 ) (*Manager, error) {
-	// 创建 Prometheus API 客户端
 	var client api.Client
 	var err error
 
@@ -110,7 +112,6 @@ func NewManager(
 		cancel:  cancel,
 	}
 
-	// 创建评估器
 	m.evaluator = &RuleEvaluator{
 		rules:      []EvalRule{},
 		interval:   time.Duration(cfg.EvaluationInterval),
@@ -121,11 +122,9 @@ func NewManager(
 	return m, nil
 }
 
-// Update 更新规则
 func (m *Manager) Update(rules rule.Rules) error {
 	m.rules = rules
 
-	// 生成规则内容并保存
 	content, err := rules.Content()
 	if err != nil {
 		m.logger.Error("failed to generate rule content",
@@ -144,9 +143,13 @@ func (m *Manager) Update(rules rule.Rules) error {
 		return err
 	}
 
-	// 转换为评估规则
 	evalRules := make([]EvalRule, len(rules))
 	for i, r := range rules {
+		m.logger.Debug("processing rule",
+			zap.Int64("rule_id", r.ID),
+			zap.Any("original_rule_labels", r.Labels.Map()),
+			zap.String("original_rule_labels_str", r.Labels.String()),
+		)
 		forDuration, _ := time.ParseDuration(r.For)
 		evalRules[i] = EvalRule{
 			ID:     strconv.FormatInt(r.ID, 10),
@@ -175,44 +178,48 @@ func (m *Manager) Update(rules rule.Rules) error {
 	return nil
 }
 
-// Run 运行管理器
 func (m *Manager) Run() {
 	m.logger.Info("starting rule manager", zap.Int64("prom_id", m.prom.ID))
 	go m.evaluator.Run(m.ctx)
 }
 
-// Stop 停止管理器
 func (m *Manager) Stop() {
 	m.logger.Info("stopping rule manager", zap.Int64("prom_id", m.prom.ID))
 	m.cancel()
 }
 
-// queryPrometheus 查询 Prometheus
-func (m *Manager) queryPrometheus(ctx context.Context, expr string) (bool, float64, error) {
+func (m *Manager) queryPrometheus(ctx context.Context, expr string) (bool, float64, map[string]string, error) {
 	value, _, err := m.promAPI.Query(ctx, expr, time.Now())
 	if err != nil {
 		m.logger.Debug("query failed",
 			zap.String("expr", expr),
 			zap.Error(err),
 		)
-		return false, 0, err
+		return false, 0, nil, err
 	}
 
 	switch v := value.(type) {
 	case model.Vector:
 		if len(v) > 0 {
-			return true, float64(v[0].Value), nil
+			labels := make(map[string]string)
+			for k, v := range v[0].Metric {
+				labels[string(k)] = string(v)
+			}
+			return true, float64(v[0].Value), labels, nil
 		}
-		return false, 0, nil
+		m.logger.Debug("query result vector empty", zap.String("expr", expr))
+		return false, 0, nil, nil
 	case *model.Scalar:
-		return true, float64(v.Value), nil
+		m.logger.Debug("query result scalar", zap.String("expr", expr), zap.Float64("value", float64(v.Value)))
+		return true, float64(v.Value), nil, nil
 	default:
-		return false, 0, nil
+		m.logger.Debug("query result unknown type", zap.String("expr", expr), zap.String("type", fmt.Sprintf("%T", v)))
+		return false, 0, nil, nil
 	}
 }
 
-// sendNotification 发送通知
 func (m *Manager) sendNotification(rule EvalRule, state string) {
+
 	alert := Alert{
 		State:       state,
 		Labels:      rule.Labels,
@@ -225,55 +232,63 @@ func (m *Manager) sendNotification(rule EvalRule, state string) {
 		alert.FiredAt = rule.FiredAt.Format(time.RFC3339)
 	}
 
-	//data, err := json.Marshal([]Alert{alert})
-	//if err != nil {
-	//	m.logger.Error("failed to marshal alert", zap.Error(err))
-	//	m.metrics.NotifyErrors.Inc()
-	//	return
-	//}
+	data, err := json.Marshal([]Alert{alert})
+	if err != nil {
+		m.logger.Error("failed to marshal alert", zap.Error(err))
+		m.metrics.NotifyErrors.Inc()
+		return
+	}
 
-	//url := fmt.Sprintf("%s%s", m.config.Gateway.URL, m.config.Gateway.NotifyPath)
+	url := fmt.Sprintf("%s%s", m.config.Gateway.URL, m.config.Gateway.NotifyPath)
+
+	m.logger.Info("preparing notification",
+		zap.String("url", url),
+		zap.String("rule_id", rule.ID),
+		zap.String("state", state),
+		zap.Float64("value", alert.Value),
+		zap.String("labels", alert.Labels.String()),
+		zap.Any("annotations", alert.Annotations),
+		zap.String("active_at", alert.ActiveAt),
+		zap.String("fired_at", alert.FiredAt),
+	)
 
 	for i := 1; i <= m.config.NotifyRetries; i++ {
-		fmt.Println("alert-data", alert)
-		//client := &http.Client{Timeout: 5 * time.Second}
-		//req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
-		//req.Header.Set("Token", m.config.AuthToken)
-		//req.Header.Set("Content-Type", "application/json")
-		//
-		//resp, err := client.Do(req)
-		//if err != nil {
-		//	m.logger.Error("notify failed",
-		//		zap.String("url", url),
-		//		zap.Int("retry", i),
-		//		zap.Error(err),
-		//	)
-		//	m.metrics.NotifyErrors.Inc()
-		//	continue
-		//}
-		//
-		//if resp.StatusCode == 200 {
-		//	io.Copy(io.Discard, resp.Body)
-		//	resp.Body.Close()
-		//	m.logger.Debug("notify succeeded", zap.String("url", url))
-		//	m.metrics.NotificationsSent.Add(1)
-		//	return
-		//}
-		//
-		//io.Copy(io.Discard, resp.Body)
-		//resp.Body.Close()
+		client := &http.Client{Timeout: 5 * time.Second}
+		req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
+		req.Header.Set("Token", m.config.AuthToken)
+		req.Header.Set("Content-Type", "application/json")
 
-		//m.logger.Error("notify failed",
-		//	zap.String("url", url),
-		//	//zap.Int("status", resp.StatusCode),
-		//	zap.Int("retry", i),
-		//)
-		//m.metrics.NotifyErrors.Inc()
-		m.metrics.NotificationsSent.Add(1)
+		resp, err := client.Do(req)
+		if err != nil {
+			m.logger.Error("notify failed",
+				zap.String("url", url),
+				zap.Int("retry", i),
+				zap.Error(err),
+			)
+			m.metrics.NotifyErrors.Inc()
+			continue
+		}
+
+		if resp.StatusCode == 200 {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			m.logger.Debug("notify succeeded", zap.String("url", url))
+			m.metrics.NotificationsSent.Add(1)
+			return
+		}
+
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		m.logger.Error("notify failed",
+			zap.String("url", url),
+			zap.Int("status", resp.StatusCode),
+			zap.Int("retry", i),
+		)
+		m.metrics.NotifyErrors.Inc()
 	}
 }
 
-// authRoundTripper HTTP认证
 type authRoundTripper struct {
 	rt    http.RoundTripper
 	token string

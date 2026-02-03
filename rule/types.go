@@ -1,6 +1,7 @@
 package rule
 
 import (
+	"alertengine/common"
 	"strconv"
 	"strings"
 	"time"
@@ -14,15 +15,15 @@ type Prom struct {
 }
 
 type Rule struct {
-	ID          int64             `json:"id"`
-	PromID      int64             `json:"prom_id"`
-	Expr        string            `json:"expr"`
-	Op          string            `json:"op"`
-	Value       string            `json:"value"`
-	For         string            `json:"for"`
-	Labels      map[string]string `json:"labels"`
-	Summary     string            `json:"summary"`
-	Description string            `json:"description"`
+	ID          int64         `json:"id"`
+	PromID      int64         `json:"prom_id"`
+	Expr        string        `json:"expr"`
+	Op          string        `json:"op"`
+	Value       string        `json:"value"`
+	For         string        `json:"for"`
+	Labels      common.Labels `json:"labels"`
+	Summary     string        `json:"summary"`
+	Description string        `json:"description"`
 }
 
 type Rules []Rule
