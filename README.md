@@ -293,56 +293,6 @@ Body:
 ]
 ```
 
-## 开发
-
-### 项目结构
-
-```
-alertengine/
-├── cmd/
-│   └── alertengine/          # 主程序入口
-│       └── main.go
-├── config/                   # 配置管理
-│   ├── config.go
-│   └── errors.go
-├── engine/                   # 核心引擎
-│   ├── manager.go           # 规则管理器
-│   ├── reloader.go          # 规则重载器
-│   ├── storage.go           # 存储适配器
-│   └── metrics.go           # 监控指标
-├── rule/                     # 规则定义
-│   ├── types.go             # 类型定义
-│   └── storage.go           # 规则存储
-├── deploy/                   # 部署配置
-│   └── systemd/
-│       └── alertengine.service
-├── config.example.yml        # 配置示例
-├── Dockerfile               # Docker 镜像
-├── docker-compose.yml       # Docker Compose
-├── Makefile                 # 构建脚本
-├── go.mod                   # Go 依赖
-└── README.md
-```
-
-### 构建命令
-
-```bash
-# 构建
-make build
-
-# 测试
-make test
-
-# 格式化代码
-make fmt
-
-# 代码检查
-make lint
-
-# 清理
-make clean
-```
-
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request！
